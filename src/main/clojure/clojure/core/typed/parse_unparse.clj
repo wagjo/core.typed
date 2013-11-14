@@ -506,7 +506,7 @@
              :drest drest
              :rest rest)))
 
-(defmethod parse-type-list 'quote 
+(defmethod parse-type-list `quote 
   [[_ syn]]
   (cond
     ((some-fn number? keyword? symbol?) syn) (r/-val syn)

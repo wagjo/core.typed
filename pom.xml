@@ -1,78 +1,108 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
+  <groupId>org.clojure</groupId>
   <artifactId>core.typed</artifactId>
-  <version>0.2.20-SNAPSHOT</version>
-  <name>${artifactId}</name>
-  <description>An optional type system for Clojure</description>
-
+  <packaging>jar</packaging>
+  <version>2.0.0-dunaj-SNAPSHOT</version>
+  <name>core.typed</name>
+  <description>Gradual typing for Clojure</description>
   <licenses>
     <license>
-      <name>Eclipse Public License 1.0</name>
-      <url>http://opensource.org/licenses/eclipse-1.0.php</url>
-      <distribution>repo</distribution>
+      <name>Eclipse Public License</name>
+      <url>http://www.eclipse.org/legal/epl-v10.html</url>
     </license>
   </licenses>
-
-  <parent>
-    <groupId>org.clojure</groupId>
-    <artifactId>pom.contrib</artifactId>
-    <version>0.1.2</version>
-  </parent>
-
+  <scm>
+    <connection>scm:git:git://github.com/wagjo/core.typed.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/wagjo/core.typed.git</developerConnection>
+    <tag>4100d8013bf8a0e405a11c0aa0aa8e040083cd65
+</tag>
+    <url>https://github.com/wagjo/core.typed</url>
+  </scm>
   <build>
+    <sourceDirectory>src/main/clojure</sourceDirectory>
+    <testSourceDirectory>src/test/clojure</testSourceDirectory>
+    <resources>
+      <resource>
+        <directory>resources</directory>
+      </resource>
+    </resources>
+    <testResources>
+      <testResource>
+        <directory>dev-resources</directory>
+      </testResource>
+      <testResource>
+        <directory>resources</directory>
+      </testResource>
+    </testResources>
+    <directory>target</directory>
+    <outputDirectory>target/classes</outputDirectory>
     <plugins>
       <plugin>
-        <groupId>com.theoryinpractise</groupId>
-        <artifactId>clojure-maven-plugin</artifactId>
-        <version>1.3.10</version>
-        <configuration>
-          <compileDeclaredNamespaceOnly>true</compileDeclaredNamespaceOnly>
-          <testDeclareNamespacesOnly>true</testDeclareNamespacesOnly>
-          <temporaryOutputDirectory>false</temporaryOutputDirectory>
-          <namespaces>
-            <!-- depends on core.async -->
-            <namespace>!cljs.core.typed.async</namespace>
-            <namespace>!clojure.core.typed.util-cljs</namespace>
-            <namespace>clojure.core.typed.*</namespace>
-            <namespace>clojure.core.typed.test.*</namespace>
-            <namespace>!clojure.core.typed.test.core</namespace>
-            <namespace>cljs.core.typed.*</namespace>
-          </namespaces>
-          <testNamespaces>
-            <namespace>clojure.core.typed.test.*</namespace>
-          </testNamespaces>
-          <warnOnReflection>true</warnOnReflection>
-          <sourceDirectories>
-            <sourceDirectory>src/main/clojure</sourceDirectory>
-            <sourceDirectory>src/test/clojure</sourceDirectory>
-            <sourceDirectory>src/main/cljs</sourceDirectory>
-            <sourceDirectory>src/test/cljs</sourceDirectory>
-          </sourceDirectories>
-        </configuration>
-      </plugin>
-      <plugin>
-        <artifactId>maven-assembly-plugin</artifactId>
-        <version>2.2</version>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>1.7</version>
         <executions>
           <execution>
-            <id>core-typed-slim-jar</id>
-            <phase>package</phase>
+            <id>add-source</id>
+            <phase>generate-sources</phase>
             <goals>
-              <goal>single</goal>
+              <goal>add-source</goal>
             </goals>
             <configuration>
-              <descriptors>
-                <descriptor>src/assembly/slim.xml</descriptor>
-              </descriptors>
+              <sources>
+                <source>src/main/cljs</source>
+              </sources>
+            </configuration>
+          </execution>
+          <execution>
+            <id>add-test-source</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>add-test-source</goal>
+            </goals>
+            <configuration>
+              <sources>
+                <source>src/test/cljs</source>
+              </sources>
             </configuration>
           </execution>
         </executions>
       </plugin>
     </plugins>
   </build>
-
-
+  <repositories>
+    <repository>
+      <id>central</id>
+      <url>http://repo1.maven.org/maven2/</url>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+    </repository>
+    <repository>
+      <id>clojars</id>
+      <url>https://clojars.org/repo/</url>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+    </repository>
+    <repository>
+      <id>sonatype-oss-public</id>
+      <url>https://oss.sonatype.org/content/groups/public/</url>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+    </repository>
+  </repositories>
   <dependencies>
     <dependency>
       <groupId>org.clojure</groupId>
@@ -81,19 +111,13 @@
       <exclusions>
         <exclusion>
           <groupId>org.clojure</groupId>
+          <artifactId>clojure</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.clojure</groupId>
           <artifactId>clojurescript</artifactId>
         </exclusion>
       </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.clojure</groupId>
-      <artifactId>core.cache</artifactId>
-      <version>0.6.3</version>
-    </dependency>
-    <dependency>
-      <groupId>org.clojure</groupId>
-      <artifactId>tools.namespace</artifactId>
-      <version>0.2.4</version>
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
@@ -121,7 +145,6 @@
       <groupId>org.clojure</groupId>
       <artifactId>clojurescript</artifactId>
       <version>0.0-1859</version>
-      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
@@ -133,34 +156,65 @@
           <artifactId>clojure</artifactId>
         </exclusion>
       </exclusions>
-      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
       <artifactId>clojure</artifactId>
       <version>1.5.1</version>
     </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>tools.namespace</artifactId>
+      <version>0.2.4</version>
+    </dependency>
+    <dependency>
+      <groupId>com.taoensso</groupId>
+      <artifactId>timbre</artifactId>
+      <version>2.1.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>core.match</artifactId>
+      <version>0.2.0-alpha12</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>core.async</artifactId>
+      <version>0.1.222.0-83d0c2-alpha</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>core.cache</artifactId>
+      <version>0.6.3</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>tools.nrepl</artifactId>
+      <version>0.2.3</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.clojure</groupId>
+          <artifactId>clojure</artifactId>
+        </exclusion>
+      </exclusions>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>clojure-complete</groupId>
+      <artifactId>clojure-complete</artifactId>
+      <version>0.2.3</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.clojure</groupId>
+          <artifactId>clojure</artifactId>
+        </exclusion>
+      </exclusions>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
-
-  <developers>
-    <developer>
-      <id>frenchy64</id>
-      <name>Ambrose Bonnaire-Sergeant</name>
-    </developer>
-  </developers>
-
-  <repositories>
-    <repository>
-      <id>sonatype-oss-public</id>
-      <url>https://oss.sonatype.org/content/groups/public/</url>
-    </repository>
-  </repositories>
-
-  <scm>
-    <connection>scm:git:git://github.com/clojure/core.typed.git</connection>
-    <developerConnection>scm:git:git://github.com/clojure/core.typed.git</developerConnection>
-    <url>http://github.com/clojure/core.typed</url>
-    <tag>HEAD</tag>
-  </scm>
 </project>
 
+<!-- This file was autogenerated by Leiningen.
+  Please do not edit it directly; instead edit project.clj and regenerate it.
+  It should not be considered canonical data. For more information see
+  https://github.com/technomancy/leiningen -->
