@@ -1438,21 +1438,28 @@
                         expr-type (ret r/-any))
         ; this is a Value type containing a java.lang.Class instance representing
         ; the type extending the protocol, or (Value nil) if extending to nil
-        target-literal-class (ret-t (expr-type catype))]
+        target-literal-class (ret-t (expr-type catype))
+        extract-class #(if (r/HeterogeneousMap? %)
+                         (eval (:val (get (:types %) (r/-val :on))))
+                         (:val %))]
     (cond
-      (not (and (r/Value? target-literal-class)
-                ((some-fn class? nil?) (:val target-literal-class))))
-      (u/tc-delayed-error
-        (str "Must provide a Class or nil as first argument to extend, "
-             "got " (pr-str (prs/unparse-type target-literal-class)))
-        :return ret-expr)
-
+     (not (or
+           (and (r/HeterogeneousMap? target-literal-class)
+                (eval (:val (get (:types target-literal-class)
+                                 (r/-val :on)))))
+           (and (r/Value? target-literal-class)
+                ((some-fn class? nil?) (:val target-literal-class)))))
+     (u/tc-delayed-error
+      (str "Must provide a Class or nil as first argument to extend, "
+           "got " (pr-str (prs/unparse-type target-literal-class)))
+      :return ret-expr)
+     
       (and expected (not (sub/subtype? r/-any (ret-t expected))))
       (do (expected-error r/-any (ret-t expected))
           ret-expr)
       :else
       (let [; this is the actual core.typed type of the thing extending the protocol
-            target-type (let [v (:val target-literal-class)]
+            target-type (let [v (extract-class target-literal-class)]
                           (if (nil? v)
                             r/-nil
                             (c/RClass-of-with-unknown-params v)))

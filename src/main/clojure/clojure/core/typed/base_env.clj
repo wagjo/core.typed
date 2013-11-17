@@ -497,7 +497,27 @@ java.lang.Iterable [[]
   (reset-rclass-env!)
   (h/alias-mappings
 
-  ^{:doc "A type that returns true for clojure.core/integer?"
+^{:doc "A type that returns true for any host interface"
+    :forms [HostInterface]}
+clojure.core.typed/HostInterface Class
+
+^{:doc "A type that returns true for any host class"
+    :forms [HostClass]}
+clojure.core.typed/HostClass Class
+
+^{:doc "A type that returns true for any protocol object"
+    :forms [Protocol]}
+clojure.core.typed/Protocol '{:on clojure.lang.Symbol
+                              :on-interface Class
+                              :clojure.core/protocol (Value true)}
+
+^{:doc "A type that returns true for any type object"
+    :forms [Type]}
+clojure.core.typed/Type '{:on clojure.lang.Symbol
+                          :on-class Class
+                          :clojure.core/type (Value true)}
+
+^{:doc "A type that returns true for clojure.core/integer?"
     :forms [AnyInteger]}
 clojure.core.typed/AnyInteger (U Integer Long clojure.lang.BigInt BigInteger Short Byte)
 
@@ -650,7 +670,8 @@ clojure.core.typed/Hierarchy '{:parents (IPersistentMap Any Any)
 (let [interns '[Option AnyInteger Id Coll Seq NonEmptySeq EmptySeqable
                 NonEmptySeqable Map EmptyCount NonEmptyCount SortedSet Set
                 Vec NonEmptyColl NonEmptyLazySeq NilableNonEmptySeq
-                Hierarchy Nilable Int Var1]]
+                Hierarchy Nilable Int Var1 HostInterface HostClass
+                Protocol Type]]
   (when (some resolve interns)
     (doseq [i interns]
       (ns-unmap *ns* i)))
@@ -702,6 +723,9 @@ clojure.core.typed/load-if-needed [-> Any]
 
 ;; core annotations
 
+clojure.core/special-symbol? [Symbol -> Boolean]
+clojure.core/satisfies? [(U nil Protocol HostClass) Any -> Boolean]
+clojure.core/do [Any * -> Any]
 clojure.core/*ns* Namespace
 clojure.core/*out* java.io.Writer
 clojure.core/*err* java.io.Writer
