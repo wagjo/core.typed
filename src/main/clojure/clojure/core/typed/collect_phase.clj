@@ -70,6 +70,7 @@
         _ (assert ns (str "Namespace " nsym " not found"))
         {:keys [check] :as opts} (u/typed-ns-opts ns)]
     (or check
+        (:ann-check (meta ns))
         (directly-depends? nsym 'clojure.core.typed))))
 
 (defn infer-typed-ns-deps!
