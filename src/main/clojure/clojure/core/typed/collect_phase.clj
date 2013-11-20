@@ -186,8 +186,9 @@
         (var-env/add-nocheck-var qsym)))))
 
 (add-collect-method :invoke
-  [expr]
-  (invoke-special-collect expr))
+  [{:keys [env] :as expr}]
+  (binding [uvar/*current-env* env]
+    (invoke-special-collect expr)))
 
 (add-collect-method :default
   [_]
@@ -198,7 +199,8 @@
   (impl/with-clojure-impl
     (let [{ancests :unchecked-ancestors} opt
           parsed-binders (when vbnd
-                           (map prs/parse-free-with-variance vbnd))
+                           (binding [prs/*parse-type-in-ns* current-ns]
+                             (mapv prs/parse-free-with-variance vbnd)))
           ;variances
           vs (seq (map :variance parsed-binders))
           args (seq (map :fname parsed-binders))
@@ -420,7 +422,8 @@
 (defn gen-protocol* [current-env current-ns vsym binder mths]
   {:pre [(symbol? current-ns)]}
   (let [parsed-binder (when binder 
-                        (map prs/parse-free-with-variance binder))
+                        (binding [prs/*parse-type-in-ns* current-ns]
+                          (mapv prs/parse-free-with-variance binder)))
         s (if (namespace vsym)
             (symbol vsym)
             (symbol (str current-ns) (name vsym)))
