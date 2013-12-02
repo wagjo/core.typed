@@ -114,6 +114,13 @@
          subtype-datatype-and-protocol subtype-rclass-protocol
          boxed-primitives subtype-datatype-rclass)
 
+(defn simplify-In [t]
+  {:pre [(r/Intersection? t)]}
+  (let [mi (apply c/In (:types t))]
+    (if (r/Intersection? mi)
+      (:types mi)
+      [mi])))
+
 ;TODO replace hardcoding cases for unfolding Mu? etc. with a single case for unresolved types.
 ;[(IPersistentSet '[Type Type]) Type Type -> (IPersistentSet '[Type Type])]
 (defn subtypeA* [A s t]
@@ -191,18 +198,35 @@
 ;          (fail! s t))
 
         (r/TApp? s)
-        (if (and (not (r/F? (:rator s)))
-                 (subtypeA*? (conj *sub-current-seen* [s t])
-                             (c/resolve-TApp s) t))
-          *sub-current-seen*
-          (fail! s t))
+        (let [{:keys [rands]} s
+              rator (c/fully-resolve-type (:rator s))]
+          (cond
+            (r/F? rator) (fail! s t)
+
+            (r/TypeFn? rator)
+            (let [names (c/TypeFn-fresh-symbols* rator)
+                  bbnds (c/TypeFn-bbnds* names rator)
+                  res (c/instantiate-typefn rator rands :names names)]
+              (if (subtypeA*? (conj *sub-current-seen* [s t]) res t)
+                *sub-current-seen*
+                (fail! s t)))
+
+            :else (u/int-error (str "First argument to TApp must be TFn, actual: " rator))))
 
         (r/TApp? t)
-        (if (and (not (r/F? (:rator t)))
-                 (subtypeA*? (conj *sub-current-seen* [s t])
-                             s (c/resolve-TApp t)))
-          *sub-current-seen*
-          (fail! s t))
+        (let [{:keys [rands]} t
+              rator (c/fully-resolve-type (:rator t))]
+          (cond
+            (r/F? rator) (fail! s t)
+
+            (r/TypeFn? rator)
+            (let [names (c/TypeFn-fresh-symbols* rator)
+                  res (c/instantiate-typefn rator rands :names names)]
+              (if (subtypeA*? (conj *sub-current-seen* [s t]) s res)
+                *sub-current-seen*
+                (fail! s t)))
+
+            :else (u/int-error (str "First argument to TApp must be TFn, actual: " rator))))
 
         (r/App? s)
         (subtypeA* *sub-current-seen* (c/resolve-App s) t)
@@ -242,21 +266,25 @@
 
         (and (r/Intersection? s)
              (r/Intersection? t))
-        (if (every? (fn intersection-both [s*]
-                      (some (fn intersection-both-inner [t*] (subtype? s* t*)) (.types ^Intersection t)))
-                    (.types ^Intersection s))
-          *sub-current-seen*
-          (fail! s t))
+        (let [ss (simplify-In s)
+              ts (simplify-In t)]
+          (if (every? (fn intersection-both [s*]
+                        (some (fn intersection-both-inner [t*] (subtype? s* t*)) ts))
+                      ss)
+            *sub-current-seen*
+            (fail! s t)))
 
         (r/Intersection? s)
-        (if (some #(subtype? % t) (.types ^Intersection s))
-          *sub-current-seen*
-          (fail! s t))
+        (let [ss (simplify-In s)]
+          (if (some #(subtype? % t) ss)
+            *sub-current-seen*
+            (fail! s t)))
 
         (r/Intersection? t)
-        (if (every? #(subtype? s %) (.types ^Intersection t))
-          *sub-current-seen*
-          (fail! s t))
+        (let [ts (simplify-In t)]
+          (if (every? #(subtype? s %) ts)
+            *sub-current-seen*
+            (fail! s t)))
 
         (and (r/Extends? s)
              (r/Extends? t))
@@ -326,7 +354,8 @@
         (and (r/F? s)
              (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name s))]
                (if-not bnd 
-                 (assert nil (str "No bounds for " (:name s)))
+                 (do #_(u/int-error (str "No bounds for " (:name s)))
+                     nil)
                  (and (subtype? upper-bound t)
                       (subtype? lower-bound t)))))
         *sub-current-seen*
@@ -334,7 +363,8 @@
         (and (r/F? t)
              (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name t))]
                (if-not bnd 
-                 (assert nil (str "No bounds for " (:name t)))
+                 (do #_(u/int-error (str "No bounds for " (:name t)))
+                     nil)
                  (and (subtype? s upper-bound)
                       (subtype? s lower-bound)))))
         *sub-current-seen*
@@ -524,6 +554,7 @@
              (r/Protocol? t))
         (let [{var1 :the-var variances* :variances poly1 :poly?} s
               {var2 :the-var poly2 :poly?} t]
+          ;(prn "protocols subtype" s t)
           (if (and (= var1 var2)
                    (every? (fn prcol-variance [[v l r]]
                              (case v
