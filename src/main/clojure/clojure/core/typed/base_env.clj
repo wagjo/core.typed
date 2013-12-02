@@ -723,8 +723,8 @@ clojure.core.typed/load-if-needed [-> Any]
 
 ;; core annotations
 
-clojure.core/special-symbol? [Symbol -> Boolean]
-clojure.core/satisfies? [(U nil Protocol HostClass) Any -> Boolean]
+clojure.core/special-symbol? [Symbol -> boolean]
+clojure.core/satisfies? [(U nil Protocol HostClass) Any -> boolean]
 clojure.core/do [Any * -> Any]
 clojure.core/*ns* Namespace
 clojure.core/*out* java.io.Writer
