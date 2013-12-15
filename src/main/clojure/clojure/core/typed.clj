@@ -118,14 +118,19 @@ for checking namespaces, cf for checking individual forms."}
   inst-of)
 
 (defmacro inst 
-  "Instantiate a polymorphic type with a number of types"
+  "Instantiate a polymorphic type with a number of types.
+  
+  eg. (inst foo-fn t1 t2 t3 ...)"
   [inst-of & types]
   `(inst-poly ~inst-of '~types))
 
 (defmacro inst-ctor
   "Instantiate a call to a constructor with a number of types.
   First argument must be an immediate call to a constructor.
-  Returns exactly the instantiatee (the first argument)."
+  Returns exactly the instantiatee (the first argument).
+  
+  eg. (inst-ctor (PolyCtor. a b c)
+                 t1 t2 ...)"
   [inst-of & types]
   `(inst-poly-ctor ~inst-of '~types))
 
@@ -1229,7 +1234,7 @@ for checking namespaces, cf for checking individual forms."}
   []
   `(warn-on-unannotated-vars*))
 
-(declare check-form-info print-errors!)
+(declare check-form-info print-errors! ^:dynamic *currently-checking-clj*)
 
 (defn check-form*
   "Takes a (quoted) form and optional expected type syntax and
@@ -1245,7 +1250,9 @@ for checking namespaces, cf for checking individual forms."}
                                                        :type-provided? type-provided?)]
      (if-let [errors (seq delayed-errors)]
        (print-errors! errors)
-       (unparse-TCResult-in-ns ret *ns*)))))
+       (impl/with-clojure-impl
+         (binding [*currently-checking-clj* true]
+           (unparse-TCResult-in-ns ret *ns*)))))))
 
 ; cf can pollute current type environment to allow REPL experimentation, 
 ; which is ok because check-ns resets it when called.

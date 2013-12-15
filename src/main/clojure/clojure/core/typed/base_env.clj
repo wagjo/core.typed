@@ -290,7 +290,7 @@ IPersistentMap [[[a :variance :covariant]
                  [b :variance :covariant]]
                 :replace
                 {IPersistentCollection (IPersistentCollection 
-                                         (I '[a b] (IMapEntry a b))
+                                         (U '[a b] (IMapEntry a b))
                                          #_(TFn [[x :variance :covariant
                                                 :< (U nil (IMapEntry Any Any))]]
                                               x)
@@ -298,7 +298,7 @@ IPersistentMap [[[a :variance :covariant]
                                            (TFn [[x :variance :covariant
                                                   :< (U nil (IMapEntry a1 b1))]]
                                                 (IPersistentMap a1 b1))))
-                 Seqable (Seqable (I '[a b] (IMapEntry a b)))
+                 Seqable (Seqable (U '[a b] (IMapEntry a b)))
                  ILookup (ILookup a b)
                  Associative (Associative a b)}]
 
@@ -318,7 +318,7 @@ APersistentMap [[[a :variance :covariant]
                  [b :variance :covariant]]
                 :replace
                 {IPersistentCollection (IPersistentCollection 
-                                         (I '[a b] (IMapEntry a b))
+                                         (U '[a b] (IMapEntry a b))
                                          #_(TFn [[x :variance :covariant
                                                 :< (U nil (IMapEntry Any Any))]]
                                               x)
@@ -327,7 +327,7 @@ APersistentMap [[[a :variance :covariant]
                                                   :< (U nil (IMapEntry a1 b1))]]
                                              (APersistentMap a1 b1))))
                  IPersistentMap (IPersistentMap a b)
-                 Seqable (Seqable (I '[a b] (IMapEntry a b)))
+                 Seqable (Seqable (U '[a b] (IMapEntry a b)))
                  IFn (All [d]
                           (Fn [Any -> (U nil b)]
                               [Any d -> (U b d)]))
@@ -339,7 +339,7 @@ PersistentHashMap [[[a :variance :covariant]
                     [b :variance :covariant]]
                    :replace
                    {IPersistentCollection (IPersistentCollection 
-                                            (I '[a b] (IMapEntry a b))
+                                            (U '[a b] (IMapEntry a b))
                                             #_(TFn [[x :variance :covariant
                                                    :< (U nil (IMapEntry Any Any))]]
                                                  x)
@@ -349,7 +349,7 @@ PersistentHashMap [[[a :variance :covariant]
                                                       (PersistentHashMap a1 b1))))
                     IPersistentMap (IPersistentMap a b)
                     APersistentMap (APersistentMap a b)
-                    Seqable (Seqable (I '[a b] (IMapEntry a b)))
+                    Seqable (Seqable (U '[a b] (IMapEntry a b)))
                     IFn (All [d]
                              (Fn [Any -> (U nil b)]
                                  [Any d -> (U b d)]))
@@ -1150,16 +1150,14 @@ clojure.core/not= [Any Any * -> boolean]
 
 clojure.core/first
      (All [x]
-          (Fn ['[x Any *] -> x]
-              [(IMapEntry x Any) -> x]
+          (Fn [(U (IMapEntry x Any) '[x Any *]) -> x]
               [(Option (EmptySeqable x)) -> nil]
               [(NonEmptySeqable x) -> x]
               [(Option (Seqable x)) -> (Option x)]))
 
 clojure.core/second
      (All [x]
-          (Fn ['[Any x Any *] -> x]
-              [(IMapEntry Any x) -> x]
+          (Fn [(U (IMapEntry Any x) '[Any x Any *]) -> x]
               [(Option (I (Seqable x) (CountRange 0 1))) -> nil]
               [(I (Seqable x) (CountRange 2)) -> x]
               [(Option (Seqable x)) -> (Option x)]))

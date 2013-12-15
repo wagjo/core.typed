@@ -32,6 +32,15 @@
 
 (t/typed-deps clojure.core.typed.name-env)
 
+(t/ann ^:no-check with-original-names [r/Type (U Symbol (Seqable Symbol))
+                                       -> r/Type])
+(defn- with-original-names [t names]
+  (with-meta t {::names names}))
+
+(t/ann ^:no-check get-original-names [r/Type -> (U nil Symbol (Seqable Symbol))])
+(defn get-original-names [t]
+  (-> t meta ::names))
+
 (t/tc-ignore
 (alter-meta! *ns* assoc :skip-wiki true)
   )
@@ -59,15 +68,18 @@
    :post [(symbol? %)]}
   (with-meta (gensym s) {:original-name s}))
 
-(declare Un make-Union)
+(declare Un make-Union fully-resolve-type)
 
-(t/ann make-Union [(U nil (Seqable r/Type)) -> r/Type])
-(defn- make-Union
+(t/ann ^:no-check make-Union [(U nil (Seqable r/Type)) -> r/Type])
+(defn make-Union
   "Arguments should not overlap or be unions"
   [args]
   (cond
     (= 1 (count args)) (first args)
-    :else (r/Union-maker (set args))))
+    :else 
+    (let [{unions true non-unions false} (group-by r/Union? args)]
+      (r/Union-maker (set (concat (mapcat :types unions)
+                                  non-unions))))))
 
 (t/ann bottom r/Type)
 (def ^:private bottom (make-Union []))
@@ -254,8 +266,11 @@
 
 (t/ann ^:no-check make-Intersection [(U nil (Seqable r/Type)) -> r/Type])
 (defn make-Intersection [types]
-  #_(prn "make-Intersection" types)
-  (r/Intersection-maker (set types)))
+  (let [cnt (count types)]
+    (cond
+      (= 0 cnt) r/-nothing
+      (= 1 cnt) (first types)
+      :else (r/Intersection-maker (set types)))))
 
 (declare RClass-of)
 
@@ -315,21 +330,27 @@
 (defn flatten-intersections [types]
   {:pre [(every? r/Type? types)]
    :post [(every? r/Type? %)]}
-  (apply concat
-         (for [t types]
-           (if (r/Intersection? t)
-             (:types t)
-             [t]))))
+  (t/loop> [work :- (Seqable r/Type), types
+            result :- (Seqable r/Type), []]
+    (if (empty? work)
+      result
+      (let [resolved (doall (map fully-resolve-type work))
+            {intersections true non-intersections false} (group-by r/Intersection? resolved)]
+        (recur (doall (mapcat :types intersections))
+               (doall (concat result non-intersections)))))))
 
 (t/ann ^:no-check flatten-unions [(U nil (Seqable r/Type)) -> (Seqable r/Type)])
 (defn flatten-unions [types]
   {:pre [(every? r/Type? types)]
    :post [(every? (every-pred r/Type? (complement r/Union?)) %)]}
-  (apply concat
-         (for [t (set types)]
-           (if (r/Union? t)
-             (:types t)
-             [t]))))
+  (t/loop> [work :- (Seqable r/Type), types
+            result :- (Seqable r/Type), []]
+    (if (empty? work)
+      result
+      (let [resolved (doall (map fully-resolve-type work))
+            {intersections true non-intersections false} (group-by r/Union? resolved)]
+        (recur (doall (mapcat :types intersections))
+               (doall (concat result non-intersections)))))))
 
 (t/ann ^:no-check In [r/Type * -> r/Type])
 (defn In [& types]
@@ -556,13 +577,13 @@
          (every? r/Bounds? bnds)
          (symbol? the-class)]
    :post [((some-fn r/TypeFn? r/RClass?) %)]}
-   (let [repl (into {} (for [[k v] replacements]
-                         [k (abstract-many names v)]))
-         uncked (set (for [u unchecked-ancestors]
-                       (abstract-many names u)))]
+   (let [_ ((impl/v 'clojure.core.typed.rclass-ancestor-env/add-rclass-replacements)
+            the-class names replacements)
+         _ ((impl/v 'clojure.core.typed.rclass-ancestor-env/add-rclass-ancestors)
+            the-class names unchecked-ancestors)]
      (if (seq variances)
-       (TypeFn* names variances bnds (r/RClass-maker variances poly? the-class repl uncked))
-       (r/RClass-maker nil nil the-class repl uncked)))))
+       (TypeFn* names variances bnds (r/RClass-maker variances poly? the-class))
+       (r/RClass-maker nil nil the-class)))))
 
 (t/ann ^:no-check isa-DataType? [(U Symbol Class) -> Any])
 (defn isa-DataType? [sym-or-cls]
@@ -637,21 +658,18 @@
                                              " Annotate with ann-record above the first time it is parsed"))
                                (flush))
                            (r/DataType-maker sym nil nil (array-map) (isa-Record? cls)))
-                         (r/RClass-maker nil nil sym {} #{}))))]
+                         (r/RClass-maker nil nil sym))))]
            (swap! RClass-of-cache assoc cache-key-hash res)
            res)))))))
 
 (t/ann ^:no-check most-general-on-variance [(Seqable r/Variance) (Seqable Bounds) -> r/Type])
 (defn most-general-on-variance [variances bnds]
   (doall
-    (for [[variance bnd] (map vector variances bnds)]
-      (if (= r/no-bounds bnd)
-        (case variance
-          (:invariant :constant :covariant) r/-any
-          :contravariant r/-nothing)
-        (assert nil (str "Don't know most general type for bounds other than Any/Nothing" 
-                         (unparse-type (:upper-bound bnd))
-                         (unparse-type (:lower-bound bnd))))))))
+    (for [[variance {:keys [upper-bound lower-bound] :as bnd}] 
+          (map vector variances bnds)]
+      (case variance
+        (:invariant :constant :covariant) upper-bound
+        :contravariant lower-bound))))
 
 (declare TypeFn-bbnds* TypeFn-fresh-symbols*)
 
@@ -777,31 +795,19 @@
 (t/ann ^:no-check RClass-replacements* [RClass -> (IPersistentMap Symbol r/Type)])
 (defn RClass-replacements*
   "Return the replacements map for the RClass"
-  [^RClass rcls]
+  [rcls]
   {:pre [(r/RClass? rcls)]
    :post [((u/hash-c? symbol? r/Type?) %)]}
-  (let [subst-all @(subst-all-var)
-        poly (.poly? rcls)]
-    (into {} (for [[k v] (.replacements rcls)]
-               [k (inst-and-subst v poly)]))))
+  ((impl/v 'clojure.core.typed.rclass-ancestor-env/rclass-replacements)
+   rcls))
 
 (t/ann ^:no-check RClass-unchecked-ancestors* [RClass -> (IPersistentSet r/Type)])
-; FIXME this is dumb, unchecked-ancestors field should be properly unwrapped
-; as an RClass field
 (defn RClass-unchecked-ancestors*
-  [^RClass rcls]
+  [rcls]
   {:pre [(r/RClass? rcls)]
    :post [((u/set-c? r/Type?) %)]}
-  (u/p :ctors/RClass-unchecked-ancestors*
-  (let [subst-all @(subst-all-var)
-        poly (.poly? rcls)
-        names (repeatedly (count poly) #(gensym "unchecked-ancestor"))
-        fs (map r/make-F names)]
-    ;(prn "RClass-unchecked-ancestors*" names)
-    (set (for [u (.unchecked-ancestors rcls)]
-           (let [t (instantiate-many names u)
-                 subst (make-simple-substitution names poly)]
-             (subst-all subst t)))))))
+  ((impl/v 'clojure.core.typed.rclass-ancestor-env/rclass-ancestors)
+   rcls))
 
 (t/ann supers-cache (t/Atom1 (t/Map Number (t/Map Symbol r/Type))))
 (defonce ^:private supers-cache (atom {}))
@@ -880,8 +886,11 @@
                                 (for [bnd bbnds]
                                   (r/visit-bounds bnd #(abstract-many names %))))
                               (abstract-many names body))]
-        (r/set-name-table! t original-names)
-        t))))
+        (with-original-names t original-names)))))
+
+;only set to true if throwing an error and need to print a TypeFn
+(t/ann *TypeFn-variance-check* Boolean)
+(def ^:dynamic *TypeFn-variance-check* true)
 
 ;smart destructor
 (t/ann ^:no-check TypeFn-body* [(Seqable Symbol) TypeFn -> r/Type])
@@ -901,12 +910,15 @@
         vs (free-ops/with-bounded-frees 
              (zipmap (map r/make-F names) bbnds)
              (fv-variances body))
-        _ (doseq [[nme variance] (map vector names (:variances typefn))]
-            (when-let [actual-v (vs nme)]
-              (when-not (= (vs nme) variance)
-                (u/int-error (str "Type variable " (-> nme r/make-F r/F-original-name) 
-                                  " appears in " (name actual-v) " position "
-                                  "when declared " (name variance))))))]
+        _ (when *TypeFn-variance-check*
+            (doseq [[nme variance] (map vector names (:variances typefn))]
+              (when-let [actual-v (vs nme)]
+                (when-not (= (vs nme) variance)
+                  (u/int-error (str "Type variable " (-> nme r/make-F r/F-original-name) 
+                                    " appears in " (name actual-v) " position "
+                                    "when declared " (name variance)
+                                    ", in " (binding [*TypeFn-variance-check* false]
+                                              (unparse-type typefn))))))))]
     body)))
 
 (t/ann ^:no-check TypeFn-bbnds* [(Seqable Symbol) TypeFn -> (Seqable Bounds)])
@@ -925,7 +937,7 @@
    :post [((some-fn nil? 
                     (every-pred seq (u/every-c? symbol?))) 
            %)]}
-  (r/lookup-name-table tfn))
+  (get-original-names tfn))
 
 (t/ann ^:no-check TypeFn-fresh-symbols* [TypeFn -> (Seqable Symbol)])
 (defn TypeFn-fresh-symbols* [tfn]
@@ -963,8 +975,7 @@
                             (for [bnd bbnds]
                               (r/visit-bounds bnd #(abstract-many names %))))
                           (abstract-many names body))]
-      (r/set-name-table! v original-names)
-      v)))
+      (with-original-names v original-names))))
 
 (t/ann ^:no-check Poly-free-names* [Poly -> (U nil (Seqable Symbol))])
 (defn Poly-free-names* [poly]
@@ -972,7 +983,7 @@
    :post [((some-fn nil? 
                     (every-pred seq (u/every-c? symbol?)))
            %)]}
-  (r/lookup-name-table poly))
+  (get-original-names poly))
 
 (t/ann ^:no-check Poly-fresh-symbols* [Poly -> (Seqable Symbol)])
 (defn Poly-fresh-symbols* [poly]
@@ -1022,8 +1033,7 @@
                                       (r/visit-bounds bnd #(abstract-many names %)))
                                     bbnds)
                               (abstract-many names body))]
-      (r/set-name-table! v original-names)
-      v)))
+      (with-original-names v original-names))))
 
 ;smart destructor
 (t/ann ^:no-check PolyDots-body* [(Seqable Symbol) PolyDots -> r/Type])
@@ -1048,7 +1058,7 @@
    :post [((some-fn nil? 
                     (every-pred seq (u/every-c? symbol?))) 
            %)]}
-  (r/lookup-name-table poly))
+  (get-original-names poly))
 
 (t/ann ^:no-check PolyDots-fresh-symbols* [PolyDots -> (Seqable Symbol)])
 (defn PolyDots-fresh-symbols* [poly]
@@ -1106,7 +1116,7 @@
 
 ;; Resolve
 
-(declare resolve-tapp* -resolve resolve-app*)
+(declare resolve-tapp* resolve-app*)
 
 (t/ann ^:no-check resolve-TApp [TApp -> r/Type])
 (defn resolve-TApp [^TApp app]
@@ -1117,9 +1127,9 @@
 (defn resolve-tapp* [rator rands & {:keys [tapp]}]
   {:pre [(r/TApp? tapp)]}
   (let [unparse-type @(unparse-type-var)
-        rator (-resolve rator)
+        rator (fully-resolve-type rator)
         _ (when-not (r/TypeFn? rator) 
-            (u/int-error (str "First argument to TApp must be TFn, actual: " rator)))]
+            (u/int-error (str "First argument to TApp must be TFn, actual: " (unparse-type rator))))]
     (when-not (= (count rands) (:nbound rator))
       (binding [vs/*current-env* (-> tapp meta :env)] ;must override env, or clear it
         (u/int-error (str "Wrong number of arguments (" (count rands) ") passed to type function: "
@@ -1136,7 +1146,7 @@
 (t/ann ^:no-check resolve-app* [r/Type (Seqable r/Type) -> r/Type])
 (defn resolve-app* [rator rands]
   (let [unparse-type @(unparse-type-var)
-        rator (-resolve rator)]
+        rator (fully-resolve-type rator)]
     (cond
       (r/Poly? rator) (do (assert (= (count rands) (.nbound ^Poly rator))
                                   (u/error-msg "Wrong number of arguments provided to polymorphic type"
@@ -1198,8 +1208,7 @@
 (defn Mu* [name body]
   (let [original-name (-> name r/make-F r/F-original-name)
         v (r/Mu-maker (abstract name body))]
-    (r/set-name-table! v original-name)
-    v))
+    (with-original-names v original-name)))
 
 ;smart destructor
 (t/ann Mu-body* [Symbol Mu -> r/Type])
@@ -1212,7 +1221,7 @@
 (defn Mu-free-name* [t]
   {:pre [(r/Mu? t)]
    :post [((some-fn symbol? nil?) %)]}
-  (r/lookup-name-table t))
+  (get-original-names t))
 
 (t/ann ^:no-check Mu-fresh-symbol* [Mu -> Symbol])
 (defn Mu-fresh-symbol* [t]
@@ -1543,9 +1552,10 @@
 
 (f/add-fold-case ::abstract-many
                  Mu
-                 (fn [{:keys [scope]} {{:keys [name count type outer name-to]} :locals}]
+                 (fn [{:keys [scope] :as mu} {{:keys [name count type outer name-to]} :locals}]
                    (let [body (remove-scopes 1 scope)]
-                     (r/Mu-maker (r/Scope-maker (name-to name count type (inc outer) body))))))
+                     (r/Mu-maker (r/Scope-maker (name-to name count type (inc outer) body))
+                                 :meta (meta mu)))))
 
 (f/add-fold-case ::abstract-many
                  PolyDots
@@ -1556,7 +1566,8 @@
                          as #(add-scopes n (name-to name count type (+ n outer) %))]
                      (r/PolyDots-maker n 
                                        (mapv #(r/visit-bounds % rs) bbnds)
-                                       (as body)))))
+                                       (as body)
+                                       :meta (meta ty)))))
 
 (f/add-fold-case ::abstract-many
                  Poly
@@ -1567,19 +1578,22 @@
                          as #(add-scopes n (name-to name count type (+ n outer) %))]
                      (r/Poly-maker n 
                              (mapv #(r/visit-bounds % as) bbnds)
-                             (as body)))))
+                             (as body)
+                                   :meta (meta poly)))))
 
 (f/add-fold-case ::abstract-many
                  TypeFn
-                 (fn [{bbnds* :bbnds n :nbound body* :scope :keys [variances]} {{:keys [name count type outer name-to]} :locals}]
+                 (fn [{bbnds* :bbnds n :nbound body* :scope :keys [variances] :as t}
+                      {{:keys [name count type outer name-to]} :locals}]
                    (let [rs #(remove-scopes n %)
                          body (rs body*)
                          bbnds (mapv #(r/visit-bounds % rs) bbnds*)
                          as #(add-scopes n (name-to name count type (+ n outer) %))]
                      (r/TypeFn-maker n 
-                                 variances
-                                 (mapv #(r/visit-bounds % as) bbnds)
-                                 (as body)))))
+                                     variances
+                                     (mapv #(r/visit-bounds % as) bbnds)
+                                     (as body)
+                                     :meta (meta t)))))
   )
 
 (t/ann ^:no-check abstract-many [(Seqable Symbol) r/Type -> (U r/Type Scope)])
@@ -1650,9 +1664,10 @@
 
 (f/add-fold-case ::instantiate-many
                Mu
-               (fn [{:keys [scope]} {{:keys [replace count outer image sb type]} :locals}]
+               (fn [{:keys [scope] :as mu} {{:keys [replace count outer image sb type]} :locals}]
                  (let [body (remove-scopes 1 scope)]
-                   (r/Mu-maker (r/Scope-maker (replace image count type (inc outer) body))))))
+                   (r/Mu-maker (r/Scope-maker (replace image count type (inc outer) body))
+                               :meta (meta mu)))))
 
 (f/add-fold-case ::instantiate-many
                PolyDots
@@ -1663,30 +1678,35 @@
                        as #(add-scopes n (replace image count type (+ n outer) %))]
                    (r/PolyDots-maker n 
                                      (mapv #(r/visit-bounds % as) bbnds)
-                                     (as body)))))
+                                     (as body)
+                                     :meta (meta ty)))))
 
 (f/add-fold-case ::instantiate-many
-               Poly
-               (fn [{bbnds* :bbnds n :nbound body* :scope :as poly} {{:keys [replace count outer image sb type]} :locals}]
-                 (let [rs #(remove-scopes n %)
-                       body (rs body*)
-                       bbnds (mapv #(r/visit-bounds % rs) bbnds*)
-                       as #(add-scopes n (replace image count type (+ n outer) %))]
-                   (r/Poly-maker n 
-                           (mapv #(r/visit-bounds % as) bbnds)
-                           (as body)))))
+                 Poly
+                 (fn [{bbnds* :bbnds n :nbound body* :scope :as poly} 
+                      {{:keys [replace count outer image sb type]} :locals}]
+                   (let [rs #(remove-scopes n %)
+                         body (rs body*)
+                         bbnds (mapv #(r/visit-bounds % rs) bbnds*)
+                         as #(add-scopes n (replace image count type (+ n outer) %))]
+                     (r/Poly-maker n 
+                                   (mapv #(r/visit-bounds % as) bbnds)
+                                   (as body)
+                                   :meta (meta poly)))))
 
 (f/add-fold-case ::instantiate-many
-               TypeFn
-               (fn [{bbnds* :bbnds n :nbound body* :scope :keys [variances]} {{:keys [replace count outer image sb type]} :locals}]
-                 (let [rs #(remove-scopes n %)
-                       body (rs body*)
-                       bbnds (mapv #(r/visit-bounds % rs) bbnds*)
-                       as #(add-scopes n (replace image count type (+ n outer) %))]
-                   (r/TypeFn-maker n 
-                             variances
-                             (mapv #(r/visit-bounds % as) bbnds)
-                             (as body)))))
+                 TypeFn
+                 (fn [{bbnds* :bbnds n :nbound body* :scope :keys [variances] :as t} 
+                      {{:keys [replace count outer image sb type]} :locals}]
+                   (let [rs #(remove-scopes n %)
+                         body (rs body*)
+                         bbnds (mapv #(r/visit-bounds % rs) bbnds*)
+                         as #(add-scopes n (replace image count type (+ n outer) %))]
+                     (r/TypeFn-maker n 
+                                     variances
+                                     (mapv #(r/visit-bounds % as) bbnds)
+                                     (as body)
+                                     :meta (meta t)))))
   )
 
 (t/ann ^:no-check instantiate-many [(Seqable Symbol) p/IScope -> r/Type])
@@ -2099,4 +2119,58 @@
          (every? r/TCResult? rtypes)]
    :post [((some-fn nil? r/Type?) %)]}
   (reduce-type-transform conj-pair left rtypes))
+
+;; Inferring bounds
+
+(defn find-bound* 
+  "Find upper bound if polarity is true, otherwise lower bound"
+  [t* polarity]
+  {:pre [(r/Type? t*)]}
+  (let [fnd-bnd #(find-bound* % polarity)
+        t t*]
+    (cond
+      (r/Name? t) (fnd-bnd (resolve-Name t))
+      (r/App? t) (fnd-bnd (resolve-App t))
+      (r/TApp? t) (fnd-bnd (resolve-TApp t))
+      (r/Mu? t) (let [name (Mu-fresh-symbol* t)
+                      body (Mu-body* name t)
+                      new-body (fnd-bnd body)]
+                  (Mu* name new-body))
+      (r/Poly? t) (fnd-bnd (Poly-body* (Poly-fresh-symbols* t)) t)
+      (r/TypeFn? t) (let [names (TypeFn-fresh-symbols* t)
+                          body (TypeFn-body* names t)
+                          bbnds (TypeFn-bbnds* names t)
+                          new-body (fnd-bnd body)]
+                      (TypeFn* names
+                               (:variances t)
+                               bbnds
+                               new-body))
+      :else (if polarity
+              r/-any
+              r/-nothing))))
+
+(defn find-upper-bound [t]
+  {:pre [(r/Type? t)]}
+  (find-bound* t true))
+
+(defn find-lower-bound [t]
+  {:pre [(r/Type? t)]}
+  (find-bound* t false))
+
+(defn infer-bounds
+  "Returns a Bounds that attempts to fill in meaningful
+  upper/lower bounds of the same rank"
+  [upper-or-nil lower-or-nil]
+  {:pre [(every? (some-fn nil? r/AnyType?) [upper-or-nil lower-or-nil])]
+   :post [(r/Bounds? %)]}
+  (let [{:keys [upper lower]} (cond 
+                                ;both bounds provided
+                                (and upper-or-nil lower-or-nil) {:upper upper-or-nil :lower lower-or-nil}
+                                ;only upper
+                                upper-or-nil {:upper upper-or-nil :lower (find-lower-bound upper-or-nil)}
+                                ;only lower
+                                lower-or-nil {:upper (find-upper-bound lower-or-nil) :lower lower-or-nil}
+                                ;no bounds provided, default to Nothing <: Any
+                                :else {:upper r/-any :lower r/-nothing})]
+    (r/Bounds-maker upper lower nil)))
 )

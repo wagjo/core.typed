@@ -13,18 +13,6 @@
   )
 
 
-(t/ann name-table Any)
-(defonce ^:private name-table (java.util.WeakHashMap.))
-
-(t/ann ^:no-check lookup-name-table [Any -> (U nil Symbol (t/Coll Symbol))])
-(defn lookup-name-table [v]
-  (.get ^java.util.WeakHashMap name-table v))
-
-(t/ann ^:no-check set-name-table! [Type (U Symbol (t/Coll Symbol)) -> nil])
-(defn set-name-table! [v n]
-  (.put ^java.util.WeakHashMap name-table v n)
-  nil)
-
 (t/ann ^:no-check -FS-var [-> (t/Var1 [p/IFilter p/IFilter -> p/IFilterSet])])
 (defn- -FS-var []
   (impl/the-var 'clojure.core.typed.filter-ops/-FS))
@@ -92,7 +80,7 @@
   "An flattened, unordered union of types"
   [(set? types)
    (every? Type? types)
-   (not (some Union? types))]
+   (not-any? Union? types)]
   :methods
   [p/TCType])
 
@@ -204,8 +192,8 @@
 (defn F-original-name 
   "Get the printable name of a free variable.
   
-  Should *only* be used for pretty-printing errors or similar, *never* instantiate
-  an instance of F with this name."
+  Used for pretty-printing errors or similar, only instantiate
+  an instance of F with this name for explicit scoping."
   [f]
   {:pre [(F? f)]
    :post [(symbol? %)]}
@@ -220,6 +208,12 @@
   [p/IScope
    (scope-body [this] body)])
 
+(t/def-alias ScopedType
+  (U Type Scope))
+
+(t/ann ^:no-check scoped-Type? (predicate (U Scope Type)))
+(def scoped-Type? (some-fn Scope? Type?))
+
 (t/ann ^:no-check scope-depth? [Scope Number -> Any])
 (defn scope-depth? 
   "True if scope is has depth number of scopes nested"
@@ -232,10 +226,8 @@
 
 (u/ann-record RClass [variances :- (U nil (t/NonEmptySeqable Variance))
                       poly? :- (U nil (t/NonEmptySeqable Type))
-                      the-class :- Symbol
-                      replacements :- (t/Map Symbol MaybeScopedType)
-                      unchecked-ancestors :- (t/Set MaybeScopedType)])
-(u/def-type RClass [variances poly? the-class replacements unchecked-ancestors]
+                      the-class :- Symbol])
+(u/def-type RClass [variances poly? the-class]
   "A restricted class, where ancestors are
   (replace replacements (ancestors the-class))"
   [(or (nil? variances)
@@ -246,16 +238,11 @@
        (and (seq poly?)
             (sequential? poly?)
             (every? Type? poly?)))
-   (symbol? the-class)
-   ((u/hash-c? symbol? (some-fn Type? Scope?)) replacements)
-   ((u/set-c? (some-fn Type? Scope?)) unchecked-ancestors)]
+   (symbol? the-class)]
   :intern
-  [variances 
-   (when poly? (map hash poly?))
-   (keyword the-class)
-   (into {} (for [[k v] replacements]
-              [(keyword k) (hash v)]))
-   (into #{} (map hash unchecked-ancestors))]
+  [variances
+   (map hash poly?)
+   (keyword the-class)]
   :methods
   [p/TCType])
 

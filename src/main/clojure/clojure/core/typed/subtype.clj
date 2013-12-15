@@ -142,6 +142,25 @@
             (r/TCResult? t))
         (assert nil "Cannot give TCResult to subtype")
 
+        ; use bounds to determine subtyping between frees and types
+        (and (r/F? s)
+             (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name s))]
+               (if-not bnd 
+                 (do #_(u/int-error (str "No bounds for " (:name s)))
+                     nil)
+                 (and (subtype? upper-bound t)
+                      (subtype? lower-bound t)))))
+        *sub-current-seen*
+
+        (and (r/F? t)
+             (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name t))]
+               (if-not bnd 
+                 (do #_(u/int-error (str "No bounds for " (:name t)))
+                     nil)
+                 (and (subtype? s upper-bound)
+                      (subtype? s lower-bound)))))
+        *sub-current-seen*
+
         (and (r/Value? s)
              (r/Value? t))
         ;already (not= s t)
@@ -211,7 +230,7 @@
                 *sub-current-seen*
                 (fail! s t)))
 
-            :else (u/int-error (str "First argument to TApp must be TFn, actual: " rator))))
+            :else (u/int-error (str "First argument to TApp must be TFn, actual: " (prs/unparse-type rator)))))
 
         (r/TApp? t)
         (let [{:keys [rands]} t
@@ -226,7 +245,7 @@
                 *sub-current-seen*
                 (fail! s t)))
 
-            :else (u/int-error (str "First argument to TApp must be TFn, actual: " rator))))
+            :else (u/int-error (str "First argument to TApp must be TFn, actual: " (prs/unparse-type rator)))))
 
         (r/App? s)
         (subtypeA* *sub-current-seen* (c/resolve-App s) t)
@@ -350,24 +369,6 @@
                  (not (subtype? s (:type t))))
           *sub-current-seen*
           (fail! s t))
-
-        (and (r/F? s)
-             (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name s))]
-               (if-not bnd 
-                 (do #_(u/int-error (str "No bounds for " (:name s)))
-                     nil)
-                 (and (subtype? upper-bound t)
-                      (subtype? lower-bound t)))))
-        *sub-current-seen*
-
-        (and (r/F? t)
-             (let [{:keys [upper-bound lower-bound] :as bnd} (free-ops/free-with-name-bnds (:name t))]
-               (if-not bnd 
-                 (do #_(u/int-error (str "No bounds for " (:name t)))
-                     nil)
-                 (and (subtype? s upper-bound)
-                      (subtype? s lower-bound)))))
-        *sub-current-seen*
 
         (and (r/AssocType? s)
              (r/AssocType? t)
@@ -1016,25 +1017,28 @@
   (impl/assert-clojure)
   (u/p :subtype/datatype-ancestors
   (let [overidden-by (fn [sym o]
+                       ;(prn "overriden by" sym (class o) o)
                        (cond
                          ((some-fn r/DataType? r/RClass?) o)
-                         (when (= sym (:the-class o))
+                         (when (#{sym} (:the-class o))
                            o)
                          (r/Protocol? o)
                          ; protocols are extended via their interface if they
                          ; show up in the ancestors of the datatype
-                         (when (and (namespace sym)
-                                    (= sym (c/Protocol-var->on-class (:the-var o))))
+                         (when (#{sym} (:on-class o))
                            o)))
-        overrides (ancest/get-datatype-ancestors dt)
-        _ (assert (every? (some-fn r/DataType? r/RClass?) overrides)
-                  "Overriding datatypes to things other than datatypes and classes NYI")
+        overrides (doall (map c/fully-resolve-type (ancest/get-datatype-ancestors dt)))
+        ;_ (prn "datatype name" the-class)
+        ;_ (prn "datatype overrides" overrides)
+        _ (assert (every? (some-fn r/Protocol? r/DataType? r/RClass?) overrides)
+                  "Overriding datatypes to things other than datatypes, protocols and classes NYI")
         ; the classes that this datatype extends.
         ; No vars should occur here because protocol are extend via
         ; their interface.
         normal-asyms (->> (ancestors (u/symbol->Class the-class))
                           (filter class?)
                           (map u/Class->symbol))
+        ;_ (prn "normal-asyms" normal-asyms)
         post-override (set
                         (for [sym normal-asyms]
                           ; either we override this ancestor ...
@@ -1046,8 +1050,7 @@
                                 (c/Protocol-with-unknown-params protocol-varsym)
                                 ;... or we make an RClass from the actual ancestor.
                                 (c/RClass-of-with-unknown-params sym))))))]
-    post-override))
-  )
+    post-override)))
 
 (defn ^:private subtype-rclass-protocol
   [s t]
@@ -1157,7 +1160,8 @@
                           (doall (map #(case %1
                                          :covariant (subtype? %2 %3)
                                          :contravariant (subtype? %3 %2)
-                                         (= %2 %3))
+                                         (and (subtype? %2 %3)
+                                              (subtype? %3 %2)))
                                       variances
                                       polyl?
                                       polyr?))))))))
@@ -1205,8 +1209,6 @@
         ; use java subclassing
         (and (empty? polyl?)
              (empty? polyr?)
-             (empty? (:replacements s))
-             (empty? (:replacements t))
              (class-isa? scls tcls))
 
         ;same base class
