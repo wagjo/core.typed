@@ -723,6 +723,8 @@ clojure.core.typed/load-if-needed [-> Any]
 
 ;; core annotations
 
+clojure.core/host-lock! (Fn [Any -> Any]
+                            [Any Any * -> Any])
 clojure.core/special-symbol? [Symbol -> boolean]
 clojure.core/satisfies? [(U nil Protocol HostClass) Any -> boolean]
 clojure.core/do [Any * -> Any]
